@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from core.paths import GaussianConditionalProbabilityPath
-from base_trainer import Trainer
+from ..core.paths import GaussianConditionalProbabilityPath
+from .base_trainer import Trainer
 
 class PushTFlowTrainer(Trainer):
     """

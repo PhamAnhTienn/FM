@@ -4,7 +4,7 @@ from typing import Optional, List, Type, Tuple, Dict
 import torch
 import torch.nn as nn
 
-from distributions import Sampleable, LabeledSampleable, IsotropicGaussian
+from .distributions import Sampleable, LabeledSampleable, IsotropicGaussian
 from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch.func import vmap, jacrev

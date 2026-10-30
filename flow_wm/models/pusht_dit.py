@@ -3,18 +3,37 @@ from einops import rearrange
 
 import torch
 import torch.nn as nn
-from models.base import ConditionalVectorField
-from models.layers import MLP, FourierEncoder, Patchifier
+from .base import ConditionalVectorField
+from .layers import Depatchifier, MLP, FourierEncoder, Patchifier
 
-class PushTFlowTransformer(ConditionalVectorField):
+
+class DiffusionTransformer(nn.Module):
+    def __init__(self, depth: int, n_tokens: int, dim: int, heads: int):
+        super().__init__()
+        layer = nn.TransformerEncoderLayer(
+            d_model=dim,
+            nhead=heads,
+            dim_feedforward=4 * dim,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=depth)
+        self.condition_norm = nn.LayerNorm(dim)
+
+    def forward(self, tokens: torch.Tensor, condition: torch.Tensor):
+        return self.encoder(tokens + self.condition_norm(condition).unsqueeze(1))
+
+
+class PushTFlowDiT(ConditionalVectorField):
     def __init__(
         self,
         img_size: int = 32,
         patch_size: int = 4,
-        num_layers: int = 8,
-        c_img: int = 3,          # Ảnh RGB của PushT có 3 kênh màu
-        cond_dim: int = 13,      # 5 chiều state s_t + 8 chiều action (k=4 bước * 2 tọa độ)
+        c_in: int = 3,
+        cond_dim: int = 13,      # 5 state s_t + 8 action (k=4 step * 2)
         dim: int = 256,
+        depth: int = 8,
         heads: int = 4,
         final_dim: int = 16,
         use_phys_token: bool = True,
@@ -31,7 +50,7 @@ class PushTFlowTransformer(ConditionalVectorField):
         self.patchifier = Patchifier(
             img_size=img_size,
             patch_size=patch_size,
-            c_in=c_img * 2,
+            c_in=c_in * 2,
             dim=dim
         )
 
@@ -43,7 +62,7 @@ class PushTFlowTransformer(ConditionalVectorField):
             self.phys_head = MLP([dim, dim, 5], final_init=True) # Dự đoán delta_s (5 chiều)
 
         self.dit = DiffusionTransformer(
-            depth=num_layers,
+            depth=depth,
             n_tokens=n_tokens,
             dim=dim,
             heads=heads,
@@ -55,7 +74,7 @@ class PushTFlowTransformer(ConditionalVectorField):
             patch_size=patch_size,
             dim=dim,
             final_dim=final_dim,
-            c_out=c_img
+            c_out=c_in
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, y: Optional[dict] = None, return_aux_physics: bool = False):

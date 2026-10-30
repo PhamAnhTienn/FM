@@ -40,7 +40,7 @@ def evaluate_nfe_efficiency_and_quality(
     batch_size: int = 64
 ):
     """
-    So sánh MSE tái tạo khung hình tương lai, sai số vật lý và độ trễ (ms) theo số bước giải ODE (NFE).
+    Compare future frame reconstruction MSE, physical error, and latency (ms) versus the number of ODE steps (NFE).
     """
     z_true_img, y_cond = sampler.sample(batch_size)
     ode = PushTCFGVectorFieldODE(model, guidance_scale=1.2)
@@ -56,7 +56,7 @@ def evaluate_nfe_efficiency_and_quality(
             torch.cuda.synchronize()
         t0 = time.perf_counter()
 
-        # Mô phỏng quá trình sinh khung hình I_{t+k} bằng EulerSimulator
+        # Simulate the process of generating future frame I_{t+k} using EulerSimulator
         pred_img = simulator.simulate(x_init, ts, use_tqdm=False, y=y_cond)
 
         if device.type == "cuda":
@@ -65,9 +65,9 @@ def evaluate_nfe_efficiency_and_quality(
 
         img_mse = torch.mean((pred_img - z_true_img) ** 2).item()
 
-        # Đo lỗi vi phạm vật lý khi không tiếp xúc (Non-Contact Drift)
+        # Measure physical violation error when there is no contact (Non-Contact Drift)
         non_contact_mask = (1.0 - y_cond["in_contact"]).view(-1, 1, 1, 1)
-        # Độ lệch pixel bất thường giữa ảnh dự đoán và ảnh gốc khi khối T lẽ ra đứng yên
+        # Abnormal pixel deviation between the predicted image and the original image when the T block should be stationary
         drift_err = torch.mean(((pred_img - z_true_img) ** 2) * non_contact_mask).item()
 
         metrics["nfe"].append(nfe)
@@ -91,15 +91,15 @@ def generate_multistep_rollout_grid(
     save_path: str = "results/pusht_rollout_grid.png"
 ):
     """
-    Cuộn (Rollout) tự hồi quy nhiều bước thời gian liên tiếp: I_0 -> I_k -> I_2k -> ...
-    Xuất ra ảnh so sánh trực quan để gắn vào README.md.
+    Rollout autoregressively for multiple consecutive time steps: I_0 -> I_k -> I_2k -> ...
+    Export visual comparison images to be attached to README.md.
     """
     ode = PushTCFGVectorFieldODE(model, guidance_scale=1.2)
     simulator = EulerSimulator(ode)
 
-    num_vis = 4  # Số quỹ đạo hiển thị
+    num_vis = 4  # Number of trajectories to visualize
     z_target, y_cond = sampler.sample(num_vis)
-    cur_img = y_cond["img_t"]  # Khung hình xuất phát I_0: (num_vis, 3, H, W)
+    cur_img = y_cond["img_t"]  # Initial frame I_0: (num_vis, 3, H, W)
 
     rollout_frames = [cur_img]
     ts = torch.linspace(0, 1, nfe_steps + 1, device=device).expand(num_vis, -1)
@@ -112,19 +112,19 @@ def generate_multistep_rollout_grid(
         }
         next_img = simulator.simulate(x_init, ts, use_tqdm=False, y=step_cond).clamp(-1.0, 1.0)
         rollout_frames.append(next_img)
-        cur_img = next_img  # Đưa khung hình vừa dự đoán làm đầu vào cho bước kế tiếp (Autoregressive)
+        cur_img = next_img  # Feed the predicted frame as input to the next step (Autoregressive)
 
-    # Xếp thành lưới (Hàng = các quỹ đạo, Cột = thời gian t=0, k, 2k, 3k...)
+    # Arrange into a grid (Rows = trajectories, Columns = time t=0, k, 2k, 3k...)
     all_frames = torch.stack(rollout_frames, dim=1).flatten(0, 1)  # (num_vis * (horizon+1), 3, H, W)
     grid = make_grid(all_frames, nrow=horizon_Rollout + 1, normalize=True, value_range=(-1, 1), pad_value=1.0)
     save_image(grid, save_path)
-    print(f"🖼 Đã lưu chuỗi khung hình dự đoán đa bước tại: {save_path}")
+    print(f"Saved multistep predicted frame sequence at: {save_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate PushT Flow World Model Rollout & MPC Efficiency")
-    parser.add_argument("--zarr_path", type=str, default=None, help="Đường dẫn tới pusht_cchi_v7_replay.zarr")
-    parser.add_argument("--phys_ckpt", type=str, default="checkpoints/pusht_phys_grounded.pt")
+    parser.add_argument("--zarr_path", type=str, default=None, help="Path to pusht_cchi_v7_replay.zarr")
+    parser.add_argument("--phys_ckpt", type=str, default="checkpoints/pusht_phys.pt")
     parser.add_argument("--base_ckpt", type=str, default="checkpoints/pusht_baseline_video.pt")
     args = parser.parse_args()
 
@@ -137,10 +137,10 @@ def main():
         ("Baseline Video DiT", args.base_ckpt)
     ]:
         if not os.path.exists(ckpt_path):
-            print(f"⚠️ Bỏ qua {ckpt_path} (chưa tìm thấy file checkpoint).")
+            print(f"Skipping {ckpt_path} (checkpoint not found).")
             continue
 
-        print(f"\n🔍 Đánh giá mô hình: {label}")
+        print(f"\nEvaluating model: {label}")
         model, ckpt = load_trained_model(ckpt_path, device)
         sampler = PushTWorldSampler(
             zarr_path=args.zarr_path,
@@ -152,7 +152,7 @@ def main():
         metrics, _, y_cond = evaluate_nfe_efficiency_and_quality(model, sampler, p_simple, device)
         all_metrics[label] = metrics
 
-        # Xuất ảnh Rollout đa bước
+        # Export multistep rollout images
         tag_slug = "phys" if ckpt["use_phys_token"] else "base"
         generate_multistep_rollout_grid(
             model, sampler, p_simple, device,
@@ -160,7 +160,7 @@ def main():
             save_path=f"results/pusht_rollout_{tag_slug}_nfe2.png"
         )
 
-        # Kiểm thử tốc độ lập kế hoạch điều khiển (MPC Planning) nếu có [PHYS_TOKEN]
+        # Test planning speed (MPC Planning) if [PHYS_TOKEN] is used
         if ckpt["use_phys_token"]:
             planner = PushTFlowPlanner(
                 model=model, p_simple=p_simple,
@@ -174,9 +174,9 @@ def main():
                 goal_block_pose=goal_pose
             )
             mpc_ms = (time.perf_counter() - t0) * 1000.0
-            print(f"🎯 [MPC Planner | 128 trajectories | NFE=2] Thời gian hoạch định: {mpc_ms:.2f} ms | Action chunk shape: {tuple(best_actions.shape)}")
+            print(f"[MPC Planner | 128 trajectories | NFE=2] Planning time: {mpc_ms:.2f} ms | Action chunk shape: {tuple(best_actions.shape)}")
 
-    # Vẽ biểu đồ Benchmark NFE vs Latency & Error
+    # Plot Benchmark NFE vs Latency & Error
     if all_metrics:
         fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
         for label, m in all_metrics.items():
@@ -197,7 +197,7 @@ def main():
 
         plt.tight_layout()
         plt.savefig("results/pusht_nfe_ablation_benchmark.png", dpi=200)
-        print("Đã lưu biểu đồ Benchmark tại: results/pusht_nfe_ablation_benchmark.png")
+        print("Saved Benchmark plot at: results/pusht_nfe_ablation_benchmark.png")
 
 
 if __name__ == "__main__":
