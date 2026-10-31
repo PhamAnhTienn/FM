@@ -54,7 +54,7 @@ class Trainer(ABC):
         # Initialize run name and output directory
         run_name = run_name or self.random_name()
         self.output_dir = os.path.join("runs", run_name)
-        os.makedirs(self.output_dir, exist_ok=False)
+        os.makedirs(self.output_dir, exist_ok=True)
         print("Initialized output directory at: " + self.output_dir)
 
         # Grab size
