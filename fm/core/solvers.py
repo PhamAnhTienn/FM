@@ -127,19 +127,30 @@ def record_every(num_timesteps: int, record_every: int):
         ]
     )
     
-    
-class MultimodalCFGVectorFieldODE(ODE):
-    def __init__(self, net: nn.Module, guidance_scale: float = 1.0):
+
+
+class CFGVectorFieldODE(ODE):
+    """
+    Classifier-Free Guidance ODE for label-conditioned vector fields u_t(x|y)
+    """
+    def __init__(self, net: nn.Module, null_label: int, guidance_scale: float = 1.0):
         self.net = net
         self.guidance_scale = guidance_scale
+        self.null_label = null_label
 
-    def drift_coefficient(self, xt: torch.Tensor, t: torch.Tensor, y: dict = None, **kwargs):
+    def drift_coefficient(self, xt: torch.Tensor, t: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-            y = {"img_t": ..., "state_action": ...}
+        Args:
+            - xt: b ...
+            - t: b
+            - y: b
+        Returns:
+            - guided drift vector: b ...
         """
-        if self.guidance_scale == 1.0 or y is None:
-            return self.net(xt, t, y)
+        guided_vector_field = self.net(xt, t, y)
+        if self.guidance_scale == 1.0:
+            return guided_vector_field
 
-        guided_vf = self.net(xt, t, y)
-        unguided_vf = self.net(xt, t, None)
-        return (1.0 - self.guidance_scale) * unguided_vf + self.guidance_scale * guided_vf
+        unguided_y = torch.ones_like(y) * self.null_label
+        unguided_vector_field = self.net(xt, t, unguided_y)
+        return (1.0 - self.guidance_scale) * unguided_vector_field + self.guidance_scale * guided_vector_field
