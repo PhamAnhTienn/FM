@@ -51,9 +51,6 @@ class Trainer(ABC):
         run_name: Optional[str] = None,
         **kwargs
     ) -> Tuple[List[float], List[int]]:
-        """
-        Linear warmup from 0 -> lr over `warmup_steps`, then constant lr.
-        """
         # Initialize run name and output directory
         run_name = run_name or self.random_name()
         self.output_dir = os.path.join("runs", run_name)
